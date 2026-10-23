@@ -1,3 +1,4 @@
+
 name: Build WiFi Modules + Ath9k + R8188eu
 
 on:
@@ -7,7 +8,7 @@ env:
   ARCH: arm64
   LLVM: 1
   LLVM_IAS: 1
-  # Must match `uname -r` on the phone exactly, or insmod rejects vermagic
+  # Must match uname -r on the phone exactly
   LOCALVER: "-android15-8-0-g25c0665dd40c-4k"
 
 jobs:
@@ -15,8 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-        # Repo must contain: kernel source at repo root (or adjust KDIR below)
-        # and a file named stock_config = output of `zcat /proc/config.gz`
+        # Repo must contain kernel source at root and stock_config
 
       - name: Install deps
         run: |
@@ -27,9 +27,14 @@ jobs:
 
       - name: Fetch external rtl8188eu source (if missing in tree)
         run: |
-          if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && [ ! -d "drivers/staging/rtl8188eu" ] && [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
+          set -e
+          if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && \
+             [ ! -d "drivers/staging/rtl8188eu" ] && \
+             [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
             echo "Cloning public rtl8188eu driver source..."
-            git -c http.extraheader="" clone --depth=1 https://github.com/aircrack-ng/rtl8188eu.git drivers/net/wireless/rtl8188eu_ext
+            git clone --depth=1 \
+              https://github.com/aircrack-ng/rtl8188eu.git \
+              drivers/net/wireless/rtl8188eu_ext
           fi
 
       - name: Configure
@@ -45,7 +50,6 @@ jobs:
           $S --enable CFG80211_WEXT
           $S --enable MAC80211_MESH
           $S --enable MAC80211_LEDS
-          # Enable Ath9k driver configs & dependencies
           $S --module ATH9K
           $S --module ATH9K_HTC
           $S --module ATH9K_COMMON
@@ -68,17 +72,18 @@ jobs:
       - name: Build modules
         run: |
           export KBUILD_MODPOST_WARN=1
+
           # Build core wireless stacks
           make -j$(nproc) M=net/wireless modules \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
           make -j$(nproc) M=net/mac80211 modules \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
-          
-          # Build Ath9k drivers (both internal PCI & USB ath9k_htc)
+
+          # Build Ath9k drivers
           make -j$(nproc) M=drivers/net/wireless/ath modules \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
 
-          # Build R8188eu driver (in-tree or external standalone fallback)
+          # Build R8188eu driver (in-tree or external fallback)
           if [ -d "drivers/net/wireless/rtl8188eu_ext" ]; then
             make -j$(nproc) -C "$PWD" M=drivers/net/wireless/rtl8188eu_ext modules \
               CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
@@ -90,7 +95,8 @@ jobs:
           fi
 
           mkdir -p out
-          # Copy all compiled .ko files into out/ folder safely
+
+          # Copy compiled .ko files
           cp net/wireless/cfg80211.ko out/ || true
           cp net/mac80211/mac80211.ko out/ || true
           find drivers/net/wireless/ath -name "*.ko" -exec cp {} out/ \; || true

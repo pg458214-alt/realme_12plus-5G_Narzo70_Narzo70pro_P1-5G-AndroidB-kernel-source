@@ -22,15 +22,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld llvm flex bison bc libssl-dev \
-            libelf-dev libncurses-dev dwarves cpio rsync python3 git \
+            libelf-dev libncurses-dev dwarves cpio rsync python3 curl \
             gcc-aarch64-linux-gnu
 
       - name: Fetch external rtl8188eu source (if missing in tree)
         run: |
-          # Check if rtl8188eu source exists in standard or staging kernel paths; if not, clone external source
-          if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && [ ! -d "drivers/staging/rtl8188eu" ]; then
-            echo "rtl8188eu not found in kernel tree, cloning lwfinger driver..."
-            git clone --depth=1 https://github.com/lwfinger/rtl8188eu.p2p.git drivers/net/wireless/rtl8188eu_ext
+          if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && [ ! -d "drivers/staging/rtl8188eu" ] && [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
+            echo "Downloading aircrack-ng rtl8188eu driver source..."
+            mkdir -p drivers/net/wireless/rtl8188eu_ext
+            curl -L https://github.com/aircrack-ng/rtl8188eu/archive/refs/heads/master.tar.gz | tar -xz -C drivers/net/wireless/rtl8188eu_ext --strip-components=1
           fi
 
       - name: Configure

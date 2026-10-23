@@ -28,8 +28,8 @@ jobs:
       - name: Fetch external rtl8188eu source (if missing in tree)
         run: |
           if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && [ ! -d "drivers/staging/rtl8188eu" ] && [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
-            echo "Cloning rtl8188eu driver source with your PAT..."
-            git -c http.extraheader="" clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/aircrack-ng/rtl8188eu.git drivers/net/wireless/rtl8188eu_ext
+            echo "Cloning public rtl8188eu driver source..."
+            git -c http.extraheader="" clone --depth=1 https://github.com/aircrack-ng/rtl8188eu.git drivers/net/wireless/rtl8188eu_ext
           fi
 
       - name: Configure

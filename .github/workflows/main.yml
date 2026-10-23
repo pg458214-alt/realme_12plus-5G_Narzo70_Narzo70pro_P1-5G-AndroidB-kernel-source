@@ -1,0 +1,73 @@
+name: Build cfg80211 + mac80211 modules
+
+on:
+  workflow_dispatch:
+
+env:
+  ARCH: arm64
+  LLVM: 1
+  LLVM_IAS: 1
+  # Must match `uname -r` on the phone exactly, or insmod rejects vermagic
+  LOCALVER: "-android15-8-o-g25c0665dd40c-4k"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        # Repo must contain: kernel source at repo root (or adjust KDIR below)
+        # and a file named stock_config = output of `zcat /proc/config.gz`
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm flex bison bc libssl-dev \
+            libelf-dev libncurses-dev dwarves cpio rsync python3 \
+            gcc-aarch64-linux-gnu
+
+      - name: Configure
+        run: |
+          KDIR="$GITHUB_WORKSPACE"
+          cd "$KDIR"
+          cp stock_config .config
+          S=scripts/config
+          $S --disable LOCALVERSION_AUTO
+          $S --set-str LOCALVERSION "$LOCALVER"
+          $S --module CFG80211
+          $S --module MAC80211
+          $S --enable CFG80211_WEXT
+          $S --enable MAC80211_MESH
+          $S --enable MAC80211_LEDS
+          $S --enable CFG80211_REQUIRE_SIGNED_REGDB || true
+          $S --disable CFG80211_REQUIRE_SIGNED_REGDB
+          $S --disable MODULE_SIG_FORCE
+          $S --disable MODULE_SIG_ALL
+          make olddefconfig \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          grep -E 'CONFIG_(CFG80211|MAC80211|LOCALVERSION)=' .config
+          make -s kernelrelease
+
+      - name: Prepare tree
+        run: |
+          make -j$(nproc) modules_prepare \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+
+      - name: Build modules
+        run: |
+          # Without a full vmlinux build there is no Module.symvers,
+          # so modpost warns about unresolved symbols. That's expected.
+          export KBUILD_MODPOST_WARN=1
+          make -j$(nproc) M=net/wireless modules \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          make -j$(nproc) M=net/mac80211 modules \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          mkdir -p out
+          cp net/wireless/cfg80211.ko net/mac80211/mac80211.ko out/
+          # Optional in-tree USB drivers (uncomment config lines above first)
+          modinfo -F vermagic out/cfg80211.ko || true
+          modinfo -F vermagic out/mac80211.ko || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wifi-modules
+          path: out/*.ko

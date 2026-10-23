@@ -84,18 +84,27 @@ jobs:
 
           # Build Ath9k drivers
           make -j$(nproc) M=drivers/net/wireless/ath modules \
+            KCFLAGS="-Wno-error" \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
 
           # Build R8188eu driver (in-tree or external fallback)
           if [ -d "drivers/net/wireless/rtl8188eu_ext" ]; then
             make -j$(nproc) -C "$PWD" M=drivers/net/wireless/rtl8188eu_ext modules \
-              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+              KCFLAGS="-Wno-error" \
+              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
           else
             make -j$(nproc) M=drivers/net/wireless/realtek/rtl8188eu modules \
+              KCFLAGS="-Wno-error" \
               CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || \
             make -j$(nproc) M=drivers/staging/rtl8188eu modules \
-              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+              KCFLAGS="-Wno-error" \
+              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
           fi
+
+          echo "== Built .ko files =="
+          find drivers/net/wireless/ath drivers/net/wireless/rtl8188eu_ext \
+            drivers/net/wireless/realtek drivers/staging/rtl8188eu \
+            -name "*.ko" 2>/dev/null || true
 
           mkdir -p out
 

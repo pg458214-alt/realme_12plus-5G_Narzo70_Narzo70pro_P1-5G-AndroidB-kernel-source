@@ -63,9 +63,12 @@ jobs:
           S=scripts/config
           $S --disable LOCALVERSION_AUTO
           $S --set-str LOCALVERSION "$LOCALVER"
-          # BTF generation fails with pahole/clang mismatch; not needed for module loading
+
+          # BTF generation fails (pahole/clang mismatch). Not needed for module loading.
           $S --disable DEBUG_INFO_BTF
           $S --disable DEBUG_INFO_BTF_MODULES
+          $S --disable DEBUG_INFO_BTF_MODULES_SPLIT || true
+
           $S --module CFG80211
           $S --module MAC80211
           $S --enable CFG80211_WEXT
@@ -80,8 +83,17 @@ jobs:
           $S --disable CFG80211_REQUIRE_SIGNED_REGDB
           $S --disable MODULE_SIG_FORCE
           $S --disable MODULE_SIG_ALL
+
           make $MAKE_ARGS olddefconfig
-          grep -E 'CONFIG_(CFG80211|MAC80211|ATH9K|R8188EU|LOCALVERSION|CFI_CLANG|MODVERSIONS|DEBUG_INFO_BTF)=' .config || true
+
+          # Fail early if BTF is still enabled after olddefconfig
+          if grep -q '^CONFIG_DEBUG_INFO_BTF=y' .config; then
+            echo "ERROR: CONFIG_DEBUG_INFO_BTF is still enabled. Fix config before building."
+            exit 1
+          fi
+
+          echo "== Key config values =="
+          grep -E '^CONFIG_(CFG80211|MAC80211|ATH9K|R8188EU|LOCALVERSION|CFI_CLANG|MODVERSIONS|DEBUG_INFO_BTF)[= ]' .config || true
           make $MAKE_ARGS -s kernelrelease
 
       - name: Full kernel build (generates Module.symvers)

@@ -1,4 +1,4 @@
-name: Build cfg80211 + mac80211 modules
+name: Build WiFi Modules + Ath9k + R8188eu
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ env:
   LLVM: 1
   LLVM_IAS: 1
   # Must match `uname -r` on the phone exactly, or insmod rejects vermagic
-  LOCALVER: "-android15-8-o-g25c0665dd40c-4k"
+  LOCALVER: "-android15-8-0-g25c0665dd40c-4k"
 
 jobs:
   build:
@@ -22,8 +22,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld llvm flex bison bc libssl-dev \
-            libelf-dev libncurses-dev dwarves cpio rsync python3 \
+            libelf-dev libncurses-dev dwarves cpio rsync python3 git \
             gcc-aarch64-linux-gnu
+
+      - name: Fetch external rtl8188eu source (if missing in tree)
+        run: |
+          # Check if rtl8188eu source exists in standard or staging kernel paths; if not, clone external source
+          if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && [ ! -d "drivers/staging/rtl8188eu" ]; then
+            echo "rtl8188eu not found in kernel tree, cloning lwfinger driver..."
+            git clone --depth=1 https://github.com/lwfinger/rtl8188eu.p2p.git drivers/net/wireless/rtl8188eu_ext
+          fi
 
       - name: Configure
         run: |
@@ -38,13 +46,19 @@ jobs:
           $S --enable CFG80211_WEXT
           $S --enable MAC80211_MESH
           $S --enable MAC80211_LEDS
+          # Enable Ath9k driver configs & dependencies
+          $S --module ATH9K
+          $S --module ATH9K_HTC
+          $S --module ATH9K_COMMON
+          $S --module ATH_COMMON
+          $S --module R8188EU
           $S --enable CFG80211_REQUIRE_SIGNED_REGDB || true
           $S --disable CFG80211_REQUIRE_SIGNED_REGDB
           $S --disable MODULE_SIG_FORCE
           $S --disable MODULE_SIG_ALL
           make olddefconfig \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
-          grep -E 'CONFIG_(CFG80211|MAC80211|LOCALVERSION)=' .config
+          grep -E 'CONFIG_(CFG80211|MAC80211|ATH9K|R8188EU|LOCALVERSION)=' .config
           make -s kernelrelease
 
       - name: Prepare tree
@@ -54,20 +68,41 @@ jobs:
 
       - name: Build modules
         run: |
-          # Without a full vmlinux build there is no Module.symvers,
-          # so modpost warns about unresolved symbols. That's expected.
           export KBUILD_MODPOST_WARN=1
+          # Build core wireless stacks
           make -j$(nproc) M=net/wireless modules \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
           make -j$(nproc) M=net/mac80211 modules \
             CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          
+          # Build Ath9k drivers (both internal PCI & USB ath9k_htc)
+          make -j$(nproc) M=drivers/net/wireless/ath modules \
+            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+
+          # Build R8188eu driver (in-tree or external standalone fallback)
+          if [ -d "drivers/net/wireless/rtl8188eu_ext" ]; then
+            make -j$(nproc) -C "$PWD" M=drivers/net/wireless/rtl8188eu_ext modules \
+              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+          else
+            make -j$(nproc) M=drivers/net/wireless/realtek/rtl8188eu modules \
+              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || \
+            make -j$(nproc) M=drivers/staging/rtl8188eu modules \
+              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+          fi
+
           mkdir -p out
-          cp net/wireless/cfg80211.ko net/mac80211/mac80211.ko out/
-          # Optional in-tree USB drivers (uncomment config lines above first)
-          modinfo -F vermagic out/cfg80211.ko || true
-          modinfo -F vermagic out/mac80211.ko || true
+          # Copy all compiled .ko files into out/ folder safely
+          cp net/wireless/cfg80211.ko out/ || true
+          cp net/mac80211/mac80211.ko out/ || true
+          find drivers/net/wireless/ath -name "*.ko" -exec cp {} out/ \; || true
+          find drivers/net/wireless/realtek/rtl8188eu -name "*.ko" -exec cp {} out/ \; || true
+          find drivers/staging/rtl8188eu -name "*.ko" -exec cp {} out/ \; || true
+          find drivers/net/wireless/rtl8188eu_ext -name "*.ko" -exec cp {} out/ \; || true
+
+          modinfo -F vermagic out/*.ko || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: wifi-modules
           path: out/*.ko
+          

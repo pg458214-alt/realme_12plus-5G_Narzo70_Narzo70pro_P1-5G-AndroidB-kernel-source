@@ -26,7 +26,7 @@ jobs:
             libelf-dev libncurses-dev dwarves cpio rsync python3 git \
             gcc-aarch64-linux-gnu
 
-      - name: Fetch external rtl8188eu source (if missing in tree)
+            - name: Fetch external rtl8188eu source (if missing in tree)
         env:
           GIT_TERMINAL_PROMPT: "0"
         run: |
@@ -36,7 +36,7 @@ jobs:
              [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
             echo "Cloning public rtl8188eu driver source..."
             git clone --depth=1 \
-              https://github.com/aircrack-ng/rtl8188eu.git \
+              https://github.com/lwfinger/rtl8188eu.git \
               drivers/net/wireless/rtl8188eu_ext
           fi
 

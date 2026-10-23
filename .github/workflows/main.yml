@@ -25,16 +25,22 @@ jobs:
             libelf-dev libncurses-dev dwarves cpio rsync python3 git \
             gcc-aarch64-linux-gnu
 
+      
       - name: Fetch external rtl8188eu source (if missing in tree)
         run: |
           set -e
+
           if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && \
              [ ! -d "drivers/staging/rtl8188eu" ] && \
              [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
-            echo "Cloning public rtl8188eu driver source..."
-            git clone --depth=1 \
-              https://github.com/aircrack-ng/rtl8188eu.git \
+
+            echo "Cloning public RTL8188EU driver source..."
+
+            git -c 'http.https://github.com/.extraheader=' \
+              clone --depth=1 \
+              https://github.com/aircrack-ng/rtl8188eus.git \
               drivers/net/wireless/rtl8188eu_ext
+
           fi
 
       - name: Configure

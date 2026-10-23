@@ -7,24 +7,41 @@ env:
   ARCH: arm64
   LLVM: 1
   LLVM_IAS: 1
-  # Must match uname -r on the phone exactly
-  LOCALVER: "-android15-8-0-g25c0665dd40c-4k"
+  # Must match uname -r on the phone exactly (letter 'o', not zero)
+  LOCALVER: "-android15-8-o-g25c0665dd40c-4k"
+  # Same compiler and cross settings used for every make call
+  MAKE_ARGS: "ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang HOSTCC=clang CROSS_COMPILE=aarch64-linux-gnu-"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-        # Repo must contain kernel source at root and stock_config
+        # Repo must contain kernel source (6.6.118) at root and phone config as stock_config
 
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm flex bison bc libssl-dev \
+          sudo apt-get install -y flex bison bc libssl-dev \
             libelf-dev libncurses-dev dwarves cpio rsync python3 git \
-            gcc-aarch64-linux-gnu
+            gcc-aarch64-linux-gnu wget gnupg
+
+      - name: Install LLVM 18 (matches phone clang 18.0.0)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm18.list
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+          for t in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+            sudo ln -sf /usr/lib/llvm-18/bin/$t /usr/local/bin/$t
+          done
+          clang --version
+          ld.lld --version
 
       - name: Fetch external rtl8188eu source (if missing in tree)
         env:
@@ -42,8 +59,6 @@ jobs:
 
       - name: Configure
         run: |
-          KDIR="$GITHUB_WORKSPACE"
-          cd "$KDIR"
           cp stock_config .config
           S=scripts/config
           $S --disable LOCALVERSION_AUTO
@@ -62,53 +77,36 @@ jobs:
           $S --disable CFG80211_REQUIRE_SIGNED_REGDB
           $S --disable MODULE_SIG_FORCE
           $S --disable MODULE_SIG_ALL
-          make olddefconfig \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
-          grep -E 'CONFIG_(CFG80211|MAC80211|ATH9K|R8188EU|LOCALVERSION)=' .config
-          make -s kernelrelease
+          make $MAKE_ARGS olddefconfig
+          grep -E 'CONFIG_(CFG80211|MAC80211|ATH9K|R8188EU|LOCALVERSION|CFI_CLANG|MODVERSIONS)=' .config
+          make $MAKE_ARGS -s kernelrelease
 
-      - name: Prepare tree
+      - name: Full kernel build (generates Module.symvers)
         run: |
-          make -j$(nproc) modules_prepare \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+          make -j$(nproc) $MAKE_ARGS Image modules
 
-      - name: Build modules
+      - name: Build external and ath modules
         run: |
           export KBUILD_MODPOST_WARN=1
 
-          # Build core wireless stacks
-          make -j$(nproc) M=net/wireless modules \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
-          make -j$(nproc) M=net/mac80211 modules \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
-
           # Build Ath9k drivers
-          make -j$(nproc) M=drivers/net/wireless/ath modules \
-            KCFLAGS="-Wno-error" \
-            CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || true
+          make -j$(nproc) $MAKE_ARGS M=drivers/net/wireless/ath modules \
+            KCFLAGS="-Wno-error" || true
 
-          # Build R8188eu driver (in-tree or external fallback)
+          # Build R8188eu driver (external source cloned above)
           if [ -d "drivers/net/wireless/rtl8188eu_ext" ]; then
-            make -j$(nproc) -C "$PWD" M=drivers/net/wireless/rtl8188eu_ext modules \
-              KCFLAGS="-Wno-error" \
-              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+            make -j$(nproc) $MAKE_ARGS -C "$PWD" M=drivers/net/wireless/rtl8188eu_ext modules \
+              KCFLAGS="-Wno-error"
           else
-            make -j$(nproc) M=drivers/net/wireless/realtek/rtl8188eu modules \
-              KCFLAGS="-Wno-error" \
-              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- || \
-            make -j$(nproc) M=drivers/staging/rtl8188eu modules \
-              KCFLAGS="-Wno-error" \
-              CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu-
+            make -j$(nproc) $MAKE_ARGS M=drivers/net/wireless/realtek/rtl8188eu modules \
+              KCFLAGS="-Wno-error" || \
+            make -j$(nproc) $MAKE_ARGS M=drivers/staging/rtl8188eu modules \
+              KCFLAGS="-Wno-error"
           fi
 
-          echo "== Built .ko files =="
-          find drivers/net/wireless/ath drivers/net/wireless/rtl8188eu_ext \
-            drivers/net/wireless/realtek drivers/staging/rtl8188eu \
-            -name "*.ko" 2>/dev/null || true
-
+      - name: Collect and verify .ko files
+        run: |
           mkdir -p out
-
-          # Copy compiled .ko files
           cp net/wireless/cfg80211.ko out/ || true
           cp net/mac80211/mac80211.ko out/ || true
           find drivers/net/wireless/ath -name "*.ko" -exec cp {} out/ \; || true
@@ -116,7 +114,13 @@ jobs:
           find drivers/staging/rtl8188eu -name "*.ko" -exec cp {} out/ \; || true
           find drivers/net/wireless/rtl8188eu_ext -name "*.ko" -exec cp {} out/ \; || true
 
-          modinfo -F vermagic out/*.ko || true
+          echo "== Built .ko files =="
+          ls -la out/
+          echo "== vermagic (must equal phone uname -r) =="
+          for f in out/*.ko; do
+            echo "$f: $(modinfo -F vermagic "$f")"
+          done
+          echo "Expected: ${LOCALVER}"
 
       - uses: actions/upload-artifact@v4
         with:

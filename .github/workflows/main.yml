@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         # Repo must contain kernel source at root and stock_config
 
       - name: Install deps
@@ -24,20 +26,19 @@ jobs:
             libelf-dev libncurses-dev dwarves cpio rsync python3 git \
             gcc-aarch64-linux-gnu
 
-      
-            - name: Fetch external rtl8188eu source (if missing in tree)
+      - name: Fetch external rtl8188eu source (if missing in tree)
+        env:
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -e
           if [ ! -d "drivers/net/wireless/realtek/rtl8188eu" ] && \
              [ ! -d "drivers/staging/rtl8188eu" ] && \
              [ ! -d "drivers/net/wireless/rtl8188eu_ext" ]; then
             echo "Cloning public rtl8188eu driver source..."
-            # Using GitHub token authorization explicitly to prevent remote authentication errors
             git clone --depth=1 \
-              https://x-access-token:${{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}}@github.com/aircrack-ng/rtl8188eu.git \
+              https://github.com/aircrack-ng/rtl8188eu.git \
               drivers/net/wireless/rtl8188eu_ext
           fi
-          
 
       - name: Configure
         run: |
@@ -112,4 +113,3 @@ jobs:
         with:
           name: wifi-modules
           path: out/*.ko
-          
